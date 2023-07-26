@@ -13,10 +13,10 @@ import json
 import sys
 import os
 
-path_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+path_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 print(path_root)
 sys.path.append(path_root)
-from llama2_sft.ft_llama.config import CUDA_VISIBLE_DEVICES, USE_TORCH, CPU_NUMS  # from config
+from llama2_sft.ft_llama2.config import CUDA_VISIBLE_DEVICES, USE_TORCH, CPU_NUMS  # from config
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:3072"
 os.environ["CUDA_VISIBLE_DEVICES"] = CUDA_VISIBLE_DEVICES
 os.environ["USE_TORCH"] = USE_TORCH
@@ -41,17 +41,15 @@ import time
 
 # from transformers import LlamaForCausalLM, LlamaModel
 # from transformers import LlamaTokenizer, LlamaConfig
-from llama2_sft.models.llama.model import LlamaForCausalLM, LlamaModel
-from llama2_sft.models.llama.tokenization_llama import LlamaTokenizer
-from llama2_sft.models.llama.configuration_llama import LlamaConfig
-from llama2_sft.ft_llama.config import PATH_MODEL_PRETRAIN, DATA_PATH, MODEL_SAVE_DIR, REPO_ID
-from llama2_sft.ft_llama.config import MICRO_BATCH_SIZE, BATCH_SIZE, GRADIENT_ACCUMULATION_STEPS
-from llama2_sft.ft_llama.config import LEARNING_RATE, EPOCHS, SAVE_STEPS, VAL_SET_SIZE, TARGET_MODULES
-from llama2_sft.ft_llama.config import IS_PARALLELIZABLE, MODEL_PARALLEL, USE_CACHE
-from llama2_sft.ft_llama.config import MAX_LENGTH_Q, MAX_LENGTH_A, MAX_LENGTH_QA
-from llama2_sft.ft_llama.config import LORA_DROPOUT, LORA_ALPHA, LORA_R
-from llama2_sft.ft_llama.config import USE_CUDA
-
+from llama2_sft.models.llama2.model import LlamaForCausalLM, LlamaModel
+from llama2_sft.models.llama2.tokenization_llama import LlamaTokenizer
+from llama2_sft.models.llama2.configuration_llama import LlamaConfig
+from llama2_sft.ft_llama2.config import PATH_MODEL_PRETRAIN, DATA_PATH, MODEL_SAVE_DIR, REPO_ID
+from llama2_sft.ft_llama2.config import MICRO_BATCH_SIZE, BATCH_SIZE, GRADIENT_ACCUMULATION_STEPS
+from llama2_sft.ft_llama2.config import LEARNING_RATE, EPOCHS, SAVE_STEPS, VAL_SET_SIZE, TARGET_MODULES
+from llama2_sft.ft_llama2.config import MAX_LENGTH_Q, MAX_LENGTH_A, MAX_LENGTH_QA
+from llama2_sft.ft_llama2.config import LORA_DROPOUT, LORA_ALPHA, LORA_R
+from llama2_sft.ft_llama2.config import USE_CUDA
 
 app = FastAPI()  # 日志文件名,为启动时的日期, 全局日志格式
 logger_level = logging.INFO
@@ -95,7 +93,17 @@ def load_model_state(model, model_save_dir="./", model_name="pytorch_model.bin",
         peft_config.inference_mode = True
         model = get_peft_model(model, peft_config)
         state_dict = torch.load(path_model, map_location=torch.device(device))
+        # print(state_dict.keys())
+        state_dict = {"base_model.model." + k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
         print(state_dict.keys())
+        print("#" * 128)
+        ### 排查不存在model.keys的 state_dict.key
+        name_dict = {name: 0 for name, param in model.named_parameters()}
+        print(name_dict.keys())
+        print("#" * 128)
+        for state_dict_key in state_dict.keys():
+            if state_dict_key not in name_dict:
+                print("{} is not exist!".format(state_dict_key))
         model.load_state_dict(state_dict, strict=False)
         # model.to(device)
         print("******model loaded success******")
@@ -227,9 +235,14 @@ def data_collator(batch):
     for ba in batch:
         x, y = ba.get("input_ids"), ba.get("labels")
         len_padding = len_max_batch - len(x) - len(y)
-        labels = [-100] * len(x) + y + [-100] * len_padding
-        input_ids = x + y + [ID_PAD] * (len_padding)
-        attention_mask = [0] * len(x) + [1] * (len_max_batch-len(x))
+        if tokenizer.padding_side and tokenizer.padding_side == "left":
+            labels = [-100] * len_padding + [-100] * len(x) + y
+            input_ids = [ID_PAD] * (len_padding) + x + y
+            attention_mask = [0] * len(x) + [1] * (len_max_batch - len(x))
+        else:
+            labels = [-100] * len(x) + y + [-100] * len_padding
+            input_ids = x + y + [ID_PAD] * (len_padding)
+            attention_mask = [0] * (len(x) + len(y)) + [1] * len_padding
         tensor_attention_mask = torch.tensor(attention_mask, dtype=torch.long)
         tensor_input_ids = torch.tensor(input_ids, dtype=torch.long)
         tensor_labels = torch.tensor(labels, dtype=torch.long)
@@ -260,7 +273,7 @@ print(ID_BOS)
 print(ID_EOS)
 model = load_model_state(model=model, model_save_dir=MODEL_SAVE_DIR)
 model = prepare_model_for_half_training(model,
-        use_gradient_checkpointing=True,
+        use_gradient_checkpointing=False,
         output_embedding_layer_name="lm_head",
         layer_norm_names=["post_attention_layernorm",
                           "input_layernorm",
@@ -268,7 +281,7 @@ model = prepare_model_for_half_training(model,
                           ],
         )
 if USE_CUDA:
-    model = model.cuda()
+    model = model.float().cuda()  # weights must be fp32 or bf16
 else:
     model = model.bfloat16()
 print_named_parameters(model, True)

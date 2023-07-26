@@ -13,7 +13,7 @@ import json
 import sys
 import os
 
-path_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+path_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 print(path_root)
 sys.path.append(path_root)
 from llama2_sft.ft_llama.config import CUDA_VISIBLE_DEVICES, USE_TORCH, CPU_NUMS  # from config
@@ -95,7 +95,17 @@ def load_model_state(model, model_save_dir="./", model_name="pytorch_model.bin",
         peft_config.inference_mode = True
         model = get_peft_model(model, peft_config)
         state_dict = torch.load(path_model, map_location=torch.device(device))
+        # print(state_dict.keys())
+        state_dict = {"base_model.model." + k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
         print(state_dict.keys())
+        print("#" * 128)
+        ### 排查不存在model.keys的 state_dict.key
+        name_dict = {name: 0 for name, param in model.named_parameters()}
+        print(name_dict.keys())
+        print("#" * 128)
+        for state_dict_key in state_dict.keys():
+            if state_dict_key not in name_dict:
+                print("{} is not exist!".format(state_dict_key))
         model.load_state_dict(state_dict, strict=False)
         # model.to(device)
         print("******model loaded success******")
@@ -200,9 +210,14 @@ def data_collator(batch):
     for ba in batch:
         x, y = ba.get("input_ids"), ba.get("labels")
         len_padding = len_max_batch - len(x) - len(y)
-        labels = [-100] * len(x) + y + [-100] * len_padding
-        input_ids = x + y + [ID_PAD] * (len_padding)
-        attention_mask = [0] * len(x) + [1] * (len_max_batch-len(x))
+        if tokenizer.padding_side and tokenizer.padding_side == "left":
+            labels = [-100] * len_padding + [-100] * len(x) + y
+            input_ids = [ID_PAD] * (len_padding) + x + y
+            attention_mask = [0] * len(x) + [1] * (len_max_batch - len(x))
+        else:
+            labels = [-100] * len(x) + y + [-100] * len_padding
+            input_ids = x + y + [ID_PAD] * (len_padding)
+            attention_mask = [0] * (len(x) + len(y)) + [1] * len_padding
         tensor_attention_mask = torch.tensor(attention_mask, dtype=torch.long)
         tensor_input_ids = torch.tensor(input_ids, dtype=torch.long)
         tensor_labels = torch.tensor(labels, dtype=torch.long)

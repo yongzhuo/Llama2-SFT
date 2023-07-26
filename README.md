@@ -22,6 +22,11 @@ text_1 = f"[INST] <<SYS>>\n    You are a helpful, respectful and honest assistan
 
 ```
 
+## 踩过的坑(截至20230727)
+```
+1. LLaMA2的weights权重不能为fp16(即必须为fp32, 或者bf16), 否则会溢出;
+```
+
 ## 微调样例
 ```shell
 地址: llama2_sft/ft_llama2

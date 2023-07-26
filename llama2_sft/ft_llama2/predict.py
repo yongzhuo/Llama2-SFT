@@ -9,10 +9,10 @@ import random
 import time
 import sys
 import os
-path_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+path_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 print(path_root)
 sys.path.append(path_root)
-from llama2_sft.ft_llama.config import CUDA_VISIBLE_DEVICES, USE_TORCH, CPU_NUMS  # from config
+from llama2_sft.ft_llama2.config import CUDA_VISIBLE_DEVICES, USE_TORCH, CPU_NUMS  # from config
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:3072"
 os.environ["CUDA_VISIBLE_DEVICES"] = CUDA_VISIBLE_DEVICES
 os.environ["USE_TORCH"] = USE_TORCH
@@ -28,15 +28,15 @@ import torch
 
 # from transformers import LlamaForCausalLM, LlamaModel
 # from transformers import LlamaTokenizer, LlamaConfig
-from llama2_sft.models.llama.model import LlamaForCausalLM, LlamaModel
-from llama2_sft.models.llama.tokenization_llama import LlamaTokenizer
-from llama2_sft.models.llama.configuration_llama import LlamaConfig
-from llama2_sft.ft_llama.config import PATH_MODEL_PRETRAIN, DATA_PATH, MODEL_SAVE_DIR, REPO_ID
-from llama2_sft.ft_llama.config import MICRO_BATCH_SIZE, BATCH_SIZE, GRADIENT_ACCUMULATION_STEPS
-from llama2_sft.ft_llama.config import LEARNING_RATE, EPOCHS, SAVE_STEPS, VAL_SET_SIZE, TARGET_MODULES
-from llama2_sft.ft_llama.config import MAX_LENGTH_Q, MAX_LENGTH_A, MAX_LENGTH_QA
-from llama2_sft.ft_llama.config import LORA_DROPOUT, LORA_ALPHA, LORA_R
-from llama2_sft.ft_llama.config import USE_CUDA
+from llama2_sft.models.llama2.model import LlamaForCausalLM, LlamaModel
+from llama2_sft.models.llama2.tokenization_llama import LlamaTokenizer
+from llama2_sft.models.llama2.configuration_llama import LlamaConfig
+from llama2_sft.ft_llama2.config import PATH_MODEL_PRETRAIN, DATA_PATH, MODEL_SAVE_DIR, REPO_ID
+from llama2_sft.ft_llama2.config import MICRO_BATCH_SIZE, BATCH_SIZE, GRADIENT_ACCUMULATION_STEPS
+from llama2_sft.ft_llama2.config import LEARNING_RATE, EPOCHS, SAVE_STEPS, VAL_SET_SIZE, TARGET_MODULES
+from llama2_sft.ft_llama2.config import MAX_LENGTH_Q, MAX_LENGTH_A, MAX_LENGTH_QA
+from llama2_sft.ft_llama2.config import LORA_DROPOUT, LORA_ALPHA, LORA_R
+from llama2_sft.ft_llama2.config import USE_CUDA
 
 
 # device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)}
@@ -57,6 +57,16 @@ def load_model_state(model, model_save_dir="./", model_name="pytorch_model.bin",
         model = get_peft_model(model, peft_config)
         state_dict = torch.load(path_model, map_location=torch.device(device))
         # print(state_dict.keys())
+        state_dict = {"base_model.model." + k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        print(state_dict.keys())
+        print("#" * 128)
+        ### 排查不存在model.keys的 state_dict.key
+        name_dict = {name: 0 for name, param in model.named_parameters()}
+        print(name_dict.keys())
+        print("#" * 128)
+        for state_dict_key in state_dict.keys():
+            if state_dict_key not in name_dict:
+                print("{} is not exist!".format(state_dict_key))
         model.load_state_dict(state_dict, strict=False)
         # model.to(device)
         print("******model loaded success******")
@@ -191,7 +201,7 @@ model = prepare_model_for_half_training(model,
                           ],
         )
 if USE_CUDA:
-    model = model.cuda()
+    model = model.float().cuda()  # weights must be fp32 or bf16
 else:
     model = model.bfloat16()
 print_named_parameters(model, use_print_data=True)
